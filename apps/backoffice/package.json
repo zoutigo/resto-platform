@@ -11,7 +11,7 @@
     "test": "echo \"no tests yet\""
   },
   "dependencies": {
-    "@resto/shared": "workspace:*",
+    "@resto/shared": "*",
     "next": "^16.4.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"

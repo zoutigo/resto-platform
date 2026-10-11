@@ -1,6 +1,6 @@
 # resto-platform
 
-Monorepo pnpm + Turborepo.
+Monorepo npm workspaces + Turborepo.
 
 | Chemin            | Rôle                                                              | Port |
 | ----------------- | ----------------------------------------------------------------- | ---- |
@@ -13,14 +13,16 @@ Monorepo pnpm + Turborepo.
 
 ```bash
 nvm use            # Node 22
-pnpm install
+npm install
 cp .env.example .env
-pnpm db:up         # Postgres + Redis (Docker)
-pnpm dev
+npm run db:up         # Postgres + Redis (Docker)
+npm run dev
 ```
 
-Vérifications : `pnpm build`, `pnpm typecheck`, `pnpm format:check`.
+Vérifications : `npm run build`, `npm run typecheck`, `npm run format:check`.
+
+Base de données : Postgres sur le port **5433** et Redis sur **6380** (décalés pour ne pas entrer en conflit avec d'autres projets). Migrations : `npm run db:migrate -w @resto/api`.
 
 ## Prochaines étapes
 
-Modèle de données (Prisma/Drizzle), auth, commandes, hors-ligne (IndexedDB + outbox idempotente).
+Auth, catalogue, commandes, hors-ligne (IndexedDB + outbox idempotente).

@@ -1,0 +1,305 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────── Enums ─────────
+
+enum Role {
+  OWNER
+  SUPERVISOR
+  WAITER
+  CASHIER
+  PREPARATOR
+}
+
+enum MembershipStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING_PREP
+  IN_PREP
+  PARTIALLY_READY
+  READY
+  PARTIALLY_SERVED
+  SERVED
+  CANCELLED
+}
+
+enum OrderChannel {
+  DINE_IN
+  PICKUP
+}
+
+enum PaymentMethod {
+  CASH
+  MOBILE_MONEY
+  CARD
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  SEATED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+// ───────── Identité & multi-tenant ─────────
+
+model User {
+  id           String   @id @default(uuid(7))
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  phone        String?
+  locale       String   @default("fr")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships  Membership[]
+  orders       Order[]       @relation("CustomerOrders")
+  reservations Reservation[]
+}
+
+model Restaurant {
+  id           String   @id @default(uuid(7))
+  slug         String   @unique
+  name         String
+  description  String?
+  city         String
+  address      String?
+  phone        String?
+  latitude     Float?
+  longitude    Float?
+  timezone     String   @default("Africa/Douala")
+  currency     String   @default("XAF")
+  openingHours Json?
+  isPublic     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships  Membership[]
+  tables       DiningTable[]
+  categories   Category[]
+  products     Product[]
+  orders       Order[]
+  reservations Reservation[]
+  syncActions  SyncAction[]
+}
+
+model Membership {
+  id           String           @id @default(uuid(7))
+  userId       String
+  restaurantId String
+  role         Role
+  status       MembershipStatus @default(PENDING)
+  approvedById String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, restaurantId])
+  @@index([restaurantId])
+}
+
+// ───────── Salle & catalogue ─────────
+
+model DiningTable {
+  id           String   @id @default(uuid(7))
+  restaurantId String
+  label        String
+  seats        Int
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant   Restaurant    @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  orders       Order[]
+  reservations Reservation[]
+
+  @@unique([restaurantId, label])
+}
+
+model Category {
+  id           String   @id @default(uuid(7))
+  restaurantId String
+  name         String
+  position     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  products   Product[]
+
+  @@unique([restaurantId, name])
+}
+
+model Product {
+  id           String   @id @default(uuid(7))
+  restaurantId String
+  categoryId   String
+  name         String
+  description  String?
+  /// Prix en XAF (entier, sans décimales)
+  price        Int
+  unit         String   @default("portion")
+  imageUrl     String?
+  isAvailable  Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  category   Category    @relation(fields: [categoryId], references: [id])
+  items      OrderItem[]
+
+  @@index([restaurantId, categoryId])
+}
+
+// ───────── Commandes ─────────
+
+model Order {
+  /// UUIDv7 généré côté client (création hors ligne possible)
+  id            String       @id @default(uuid(7))
+  restaurantId  String
+  /// Numéro lisible attribué par le serveur à la synchronisation (null tant que non synchronisé)
+  number        Int?
+  channel       OrderChannel @default(DINE_IN)
+  status        OrderStatus  @default(DRAFT)
+  tableId       String?
+  customerId    String?
+  customerName  String?
+  customerPhone String?
+  isPaid        Boolean      @default(false)
+  pickupAt      DateTime?
+  expectedAt    DateTime?
+  waiterId      String?
+  cashierId     String?
+  preparatorId  String?
+  supervisorId  String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  restaurant Restaurant     @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  table      DiningTable?   @relation(fields: [tableId], references: [id])
+  customer   User?          @relation("CustomerOrders", fields: [customerId], references: [id])
+  items      OrderItem[]
+  comments   OrderComment[]
+  payments   Payment[]
+
+  @@unique([restaurantId, number])
+  @@index([restaurantId, status])
+  @@index([restaurantId, createdAt])
+}
+
+model OrderItem {
+  id        String   @id @default(uuid(7))
+  orderId   String
+  productId String
+  /// Copie du nom et du prix au moment de la commande
+  name      String
+  unitPrice Int
+  qty       Int
+  note      String?
+  createdAt DateTime @default(now())
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+}
+
+model OrderComment {
+  id        String   @id @default(uuid(7))
+  orderId   String
+  authorId  String?
+  role      Role?
+  message   String
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model Payment {
+  id             String        @id @default(uuid(7))
+  orderId        String
+  method         PaymentMethod
+  status         PaymentStatus @default(PENDING)
+  amount         Int
+  /// Fournisseur (MTN MoMo, Orange Money, ...) : renseigné quand les paiements en ligne seront actifs
+  provider       String?
+  providerRef    String?
+  idempotencyKey String        @unique
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+// ───────── Réservations ─────────
+
+model Reservation {
+  id            String            @id @default(uuid(7))
+  restaurantId  String
+  tableId       String?
+  customerId    String?
+  customerName  String
+  customerPhone String?
+  partySize     Int
+  startsAt      DateTime
+  durationMin   Int               @default(90)
+  status        ReservationStatus @default(PENDING)
+  note          String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  restaurant Restaurant   @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  table      DiningTable? @relation(fields: [tableId], references: [id])
+  customer   User?        @relation(fields: [customerId], references: [id])
+
+  @@index([restaurantId, startsAt])
+}
+
+// ───────── Synchronisation hors ligne ─────────
+
+/// Journal des actions client rejouées ; l'id (UUID client) garantit l'idempotence.
+model SyncAction {
+  id           String    @id
+  restaurantId String
+  deviceId     String
+  userId       String?
+  type         String
+  payload      Json
+  /// Date de l'action côté appareil
+  clientAt     DateTime
+  receivedAt   DateTime  @default(now())
+  appliedAt    DateTime?
+  error        String?
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, receivedAt])
+}

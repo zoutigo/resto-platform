@@ -1,7 +1,11 @@
 {
   "name": "resto-platform",
   "private": true,
-  "packageManager": "pnpm@11.25.0",
+  "packageManager": "npm@10.9.3",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "engines": {
     "node": ">=22"
   },
