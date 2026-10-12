@@ -1,0 +1,8 @@
+# Précommit : lint + formatage (fichiers indexés), typecheck, tests unitaires, puis tests
+# fonctionnels de l'API (Postgres est démarré au besoin).
+# Les tests Playwright (front) ne tournent que dans le CI : trop longs pour un commit.
+npx lint-staged || exit 1
+npm run typecheck || exit 1
+npm test || exit 1
+npm run db:up || exit 1
+npm run test:e2e -w @resto/api || exit 1

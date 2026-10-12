@@ -3,3 +3,9 @@ dist
 .next
 .turbo
 package-lock.json
+.next-e2e
+playwright-report
+test-results
+coverage
+src/generated
+next-env.d.ts

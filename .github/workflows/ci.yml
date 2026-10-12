@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev, main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Jobs en parallèle : la durée totale est celle du plus long, pas la somme.
+jobs:
+  quality:
+    name: Qualité (lint, format, typecheck, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      CI: 'true'
+      HUSKY: '0'
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Client Prisma
+        run: npm run prisma:generate -w @resto/api
+      - name: Lint et formatage
+        run: |
+          npm run lint
+          npm run format:check
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+
+  unit:
+    name: Tests unitaires
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      CI: 'true'
+      HUSKY: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Client Prisma
+        run: npm run prisma:generate -w @resto/api
+      - name: Tests unitaires
+        run: npm test
+
+  e2e-api:
+    name: Tests fonctionnels API
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    # Mêmes identifiants et port que le docker-compose.yml de dev : rien à configurer.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: resto
+          POSTGRES_PASSWORD: resto
+          POSTGRES_DB: resto
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd="pg_isready -U resto"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      CI: 'true'
+      HUSKY: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Client Prisma
+        run: npm run prisma:generate -w @resto/api
+      - name: Tests fonctionnels API
+        run: npx turbo run test:e2e --filter=@resto/api
+
+  e2e-front:
+    name: Tests fonctionnels ${{ matrix.app }} (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [backoffice, storefront]
+    env:
+      CI: 'true'
+      HUSKY: '0'
+      PW_CHANNEL: chromium
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build des paquets partagés
+        run: npx turbo run build --filter='./packages/*'
+      - name: Navigateur Playwright
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/${{ matrix.app }}
+      - name: Tests Playwright
+        run: npm run test:e2e -w @resto/${{ matrix.app }}
+      - name: Rapport Playwright
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.app }}
+          path: |
+            apps/${{ matrix.app }}/playwright-report
+            apps/${{ matrix.app }}/test-results
+          retention-days: 7

@@ -1,0 +1,42 @@
+name: Main - contrôles
+
+# Les tests complets (unitaires + fonctionnels) tournent sur `dev` (ci.yml) : `main` ne reçoit que
+# du code déjà validé, on y refait seulement les contrôles rapides. Le déploiement VPS viendra ici.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: main-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Contrôles (lint, format, typecheck, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      CI: 'true'
+      HUSKY: '0'
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Client Prisma
+        run: npm run prisma:generate -w @resto/api
+      - name: Lint et formatage
+        run: |
+          npm run lint
+          npm run format:check
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
