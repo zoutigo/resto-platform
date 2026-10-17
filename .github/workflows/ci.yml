@@ -103,6 +103,21 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    # Les tests Playwright lancent la vraie API (voir packages/e2e-support) : base `resto_test`.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: resto
+          POSTGRES_PASSWORD: resto
+          POSTGRES_DB: resto
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd="pg_isready -U resto"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     strategy:
       fail-fast: false
       matrix:

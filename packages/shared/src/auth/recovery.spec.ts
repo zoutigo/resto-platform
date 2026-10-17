@@ -57,6 +57,48 @@ describe('birthDateSchema', () => {
   });
 });
 
+describe('birthDateSchema — idempotence', () => {
+  const schema = birthDateSchema(new Date('2026-10-17T00:00:00Z'));
+
+  it('accepte sa propre sortie (valider deux fois donne le même résultat)', () => {
+    const once = schema.parse({ day: '5', month: '3', year: '1990' });
+    expect(once).toBe('1990-03-05');
+    expect(schema.parse(once)).toBe(once);
+  });
+
+  it.each([
+    '1990-3-5',
+    '90-03-05',
+    '1990/03/05',
+    '1990-02-30',
+    '1990-13-01',
+    '2020-01-01',
+    '1899-12-31',
+    '',
+    'abc',
+  ])('refuse la chaîne « %s »', (value) => {
+    expect(schema.safeParse(value).success).toBe(false);
+  });
+
+  it('refuse les types inattendus', () => {
+    for (const bad of [null, undefined, 19900305, [], true])
+      expect(schema.safeParse(bad).success).toBe(false);
+  });
+});
+
+describe("messages d'erreur des formulaires", () => {
+  it('un menu de date laissé vide renvoie birthDate.invalid, pas un message technique', () => {
+    const r = birthDateSchema(new Date('2026-10-17')).safeParse({ day: '', month: '', year: '' });
+    expect(r.success).toBe(false);
+    expect([...new Set(r.error?.issues.map((i) => i.message))]).toEqual(['birthDate.invalid']);
+  });
+
+  it('une question non choisie renvoie question.required', () => {
+    const r = recoveryAnswersSchema(1).safeParse([{ question: '', answer: 'x' }]);
+    expect(r.error?.issues.map((i) => i.message)).toContain('question.required');
+  });
+});
+
 describe('recoveryAnswersSchema', () => {
   const answer = (question: string, text = 'réponse') => ({ question, answer: text });
 

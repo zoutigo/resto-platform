@@ -4,12 +4,14 @@ Plateforme pour restaurants au **Cameroun** : une vitrine client (réservation +
 
 ## Produits
 
-| App               | Rôle                                                                                                            | Techno                       | Port |
-| ----------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------- | ---- |
-| `apps/api`        | API unique, source de vérité                                                                                    | NestJS 12 (ESM), Prisma 7.10 | 4000 |
-| `apps/backoffice` | Opérations restaurant : prise de commande, cuisine, caisse, réservations, menu, rôles. PWA hors-ligne (à faire) | Next.js 16                   | 3000 |
-| `apps/storefront` | Vitrine client : annuaire, menu, commande à emporter, réservation, suivi                                        | Next.js 16 (SEO)             | 3001 |
-| `packages/shared` | Types, machine à états des commandes, utilitaires (`formatXAF`)                                                 | TypeScript                   | -    |
+| App                    | Rôle                                                                                                             | Techno                       | Port |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------- | ---- |
+| `apps/api`             | API unique, source de vérité                                                                                     | NestJS 12 (ESM), Prisma 7.10 | 4000 |
+| `apps/backoffice`      | Opérations restaurant : prise de commande, cuisine, caisse, réservations, menu, rôles. PWA hors-ligne (à faire)  | Next.js 16                   | 3000 |
+| `apps/storefront`      | Vitrine client : annuaire, menu, commande à emporter, réservation, suivi                                         | Next.js 16 (SEO)             | 3001 |
+| `packages/shared`      | Types, machine à états des commandes, schémas Zod (auth), client API, utilitaires (`formatXAF`)                  | TypeScript                   | -    |
+| `packages/ui`          | Composants shadcn/ui, thème Tailwind, i18n FR/EN, toasts, formulaires d'authentification partagés des deux sites | React, Tailwind 4            | -    |
+| `packages/e2e-support` | Configuration Playwright commune, données de test uniques, assistants d'API                                      | Playwright                   | -    |
 
 Mobile (React Native / Expo, Android puis iOS) viendra **après** les sites, avec le même client API et `@resto/shared`. Ancien prototype mobile de référence fonctionnelle : `~/projets/orders-app` (Expo, sync TCP locale, mots de passe en clair — ne pas le reprendre techniquement).
 
@@ -45,6 +47,17 @@ Les ports Docker sont **5433/6380** car 5432/6379 sont pris par un autre projet 
 - Le **serveur est la source de vérité** ; le hors-ligne est une tolérance aux coupures (réseau, électricité), pas un mode nominal.
 - Abstractions `PaymentProvider` et `NotificationChannel` dès le départ : en v1 seulement « cash » et « in-app ».
 
+## Authentification (en place)
+
+Deux espaces, une seule table `User` : `/auth/staff/*` (back-office) et `/auth/customer/*` (vitrine). Jetons d'accès JWT de 15 min d'**audience** `staff` ou `customer` (un jeton client n'ouvre jamais le back-office) ; refresh token à rotation (famille révoquée en cas de rejeu) dans un cookie httpOnly `resto_<espace>_rt` pour le web, dans le corps avec `x-client: native` pour le mobile. Les rôles viennent de `Membership` et sont **relus en base à chaque requête** (garde `@RestaurantRoles`) ; un non-membre reçoit la même 404 qu'un restaurant inexistant.
+
+- **Méthodes** : téléphone camerounais (+237, 9 chiffres commençant par 6) + **PIN à 6 chiffres** (Argon2id + pepper) ; email + mot de passe (inscription en deux temps : le compte n'existe qu'après le code reçu par email) ; Google (ID token vérifié par l'API, rattachement seulement si l'email est vérifié des deux côtés).
+- **Récupération sans SMS** : code de secours (affiché une fois), date de naissance + réponses secrètes (client : immédiat puis compte restreint 48 h ; compte ayant un rôle : demande **différée** 24 h/48 h, annulable par le titulaire, un gérant, ou en se connectant avec l'ancien PIN), code reçu par email. Toutes les erreurs de récupération sont génériques (pas d'énumération de comptes).
+- **Anti-abus** : ralentissement progressif (table `AuthAttempt`) par compte et par IP, jamais de verrouillage dur ; comptes d'employés créés avec un **PIN temporaire** (claim JWT `mc` : toute route est refusée avec 403 tant qu'il n'est pas remplacé).
+- Le numéro n'est **pas vérifié** (pas de SMS) : `phoneVerifiedAt` reste null tant que le restaurant n'a pas rappelé le client ; après immatriculation, ajouter l'OTP sans migration (`PhoneVerifiedMethod.OTP`).
+- Variables : `AUTH_JWT_SECRET`, `AUTH_PEPPER` (≥ 32 caractères, obligatoires), `WEB_ORIGINS`, `TRUST_PROXY`, `SMTP_URL`/`MAIL_FROM` (sans `SMTP_URL` : emails en console en dev, **désactivés** en production), `GOOGLE_CLIENT_ID` côté API et `NEXT_PUBLIC_GOOGLE_CLIENT_ID` côté sites. Seed de démo : `npm run db:seed -w @resto/api` (PIN `483920`, interdit en production).
+- Pas encore enforcé : le mode « compte restreint » (champ `User.restrictedUntil`, exposé en `restricted`) doit limiter les commandes en attente quand les commandes existeront.
+
 ## Contraintes métier (société non immatriculée)
 
 Tant que la société n'est pas immatriculée :
@@ -72,17 +85,19 @@ Android d'entrée de gamme, data chère : pages légères, images WebP redimensi
 
 ## Tests
 
-| Quoi                                                   | Outil                                                 | Commande                                |
-| ------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------- |
-| `shared`, `backoffice`, `storefront` (unit/composants) | Vitest (+ Testing Library, jsdom pour les sites)      | `npm test -w @resto/<workspace>`        |
-| `api` unitaire (tout mocké)                            | Vitest + SWC (décorateurs Nest)                       | `npm test -w @resto/api`                |
-| `api` fonctionnel                                      | Vitest + supertest, vraie app Nest, base `resto_test` | `npm run test:e2e -w @resto/api`        |
-| sites fonctionnel                                      | Playwright (projets `mobile` Pixel 5 puis `desktop`)  | `npm run test:e2e -w @resto/backoffice` |
+| Quoi                                                   | Outil                                                                                         | Commande                                |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `shared`, `backoffice`, `storefront` (unit/composants) | Vitest (+ Testing Library, jsdom pour les sites)                                              | `npm test -w @resto/<workspace>`        |
+| `api` unitaire (tout mocké)                            | Vitest + SWC (décorateurs Nest)                                                               | `npm test -w @resto/api`                |
+| `api` fonctionnel                                      | Vitest + supertest, vraie app Nest, base `resto_test`                                         | `npm run test:e2e -w @resto/api`        |
+| `packages/ui` (composants, API simulée)                | Vitest + Testing Library (jsdom)                                                              | `npm test -w @resto/ui`                 |
+| sites fonctionnel                                      | Playwright (projets `mobile` Pixel 5 puis `desktop`), **vraie API + vraie base `resto_test`** | `npm run test:e2e -w @resto/backoffice` |
 
 - Vitest et non Jest pour l'API : elle est en ESM, où ts-jest est pénible. `unplugin-swc` fournit les métadonnées de décorateurs.
 - Postgres doit tourner (`npm run db:up`). La base `resto_test` est créée, migrée et vidée automatiquement par `apps/api/scripts/reset-test-db.mjs`, qui **refuse** toute base dont le nom ne contient pas « test » : la base de dev n'est jamais touchée.
 - Convention : `*.spec.ts(x)` à côté du code ; fonctionnels API dans `apps/api/test/*.e2e-spec.ts` ; Playwright dans `apps/<site>/e2e/*.spec.ts`.
-- Playwright : serveur Next sur le port de dev + 10 (3010 / 3011) avec `distDir` `.next-e2e` (ne gêne pas `next dev`). Chrome système par défaut ; en CI `PW_CHANNEL=chromium`. Sélecteurs : `getByRole` / `getByLabel`. Tests **indépendants** (données uniques) pour pouvoir les découper en shards.
+- Playwright (config commune dans `packages/e2e-support`) : lance l'**API réelle** (`NODE_ENV=test`, port 4010, base `resto_test` remise à zéro) puis le site en **build de production** sur le port de dev + 10 (3010 / 3011, `distDir` `.next-e2e`). Chrome système par défaut ; en CI `PW_CHANNEL=chromium`. Sélecteurs : `getByRole` / `getByLabel`. Tests **indépendants** : chacun a sa propre IP (`X-Forwarded-For`, `TRUST_PROXY=1`), ses numéros et emails uniques ; les comptes se préparent par l'API (`api.ownerWithRestaurant()`…) et l'UI ne teste que l'écran visé. Les emails « envoyés » se lisent via `GET /__test/emails` (module chargé **uniquement** si `NODE_ENV=test`).
+- Piège Vitest/jest-dom : les `vitest.setup.ts` enregistrent les matchers avec `expect.extend(matchers)` (et non `jest-dom/vitest`, qui importerait le Vitest de la racine selon le hoisting npm).
 - Piège Vitest : `beforeEach(() => mock.mockReset())` renvoie la fonction mock, que Vitest appelle ensuite comme nettoyage ; utiliser des accolades.
 - `@testing-library/jest-dom` reste en **6.x** (la 7 ne s'enregistre pas avec Vitest 2).
 
@@ -106,11 +121,11 @@ Toute nouvelle route d'API a des tests d'**autorisation** (rôle `Membership` ma
 ### 2. UI : mobile first, composants réutilisables, shadcn
 
 - Responsive **mobile d'abord** (Android d'entrée de gamme), puis tablette et desktop, chacun ergonomique dans son contexte (nav latérale vs barre basse, tableau vs cartes…) : traité **et testé** (Playwright mobile + desktop). Skill `frontend-design:frontend-design` pour les choix de design ; vérification visuelle via claude-in-chrome.
-- **shadcn/ui** pour tous les composants de base : ne jamais recréer un composant qui existe (`npx shadcn@latest add <composant>`). Les fichiers générés vivent dans `src/components/ui` (ignorés par ESLint, ne pas les modifier à la main).
-- **Éléments réutilisables d'abord** : avant d'écrire un composant, un hook ou un utilitaire, chercher s'il existe déjà. Ce qui sert aux deux sites (types, schémas Zod, utilitaires, client API) va dans `packages/shared` ; ce qui est propre à un site va dans son `src/components/<domaine>/`, `src/lib/`, `src/hooks/`. Pas de copier-coller entre `backoffice` et `storefront`.
+- **shadcn/ui** pour tous les composants de base : ne jamais recréer un composant qui existe. Les fichiers générés vivent dans **`packages/ui/src/components/ui`** (partagés par les deux sites, ignorés par ESLint, ne pas les modifier à la main). Pour en ajouter : `cd packages/ui && npx shadcn@latest add <composant>` ; la CLI ajoute parfois un faux paquet `cn` et des versions trop récentes dans `package.json` : vérifier `git diff` (imports `@resto/ui/lib/utils`, TypeScript 6, Vitest 2, jest-dom 6).
+- **Éléments réutilisables d'abord** : avant d'écrire un composant, un hook ou un utilitaire, chercher s'il existe déjà. Ce qui sert aux deux sites va dans un paquet : types, schémas Zod, client API → `packages/shared` ; composants React, i18n, toasts, formulaires → `packages/ui` (le routeur Next est **injecté** par les apps : le paquet n'importe pas `next`) ; ce qui est propre à un site va dans son `src/components/<domaine>/`, `src/lib/`. Pas de copier-coller entre `backoffice` et `storefront`.
 - **Formulaires** : react-hook-form + `zodResolver` avec des schémas Zod **partagés avec l'API** (`@resto/shared`), `mode: 'onChange'`, `FormField`/`FormMessage` de shadcn.
-- **Retour d'information** : toute action utilisateur annonce son résultat par un toast (`notify.success` / `notify.error`, jamais `toast()` direct), et tout échec d'envoi de formulaire passe par un `handleSubmitError` unique (erreurs Zod de l'API sous les champs, autres erreurs en message général + toast). À créer avec le premier formulaire, puis à tester : succès, erreur de validation, 500, réseau coupé.
-- Textes en FR/EN dès le début (fichiers de messages), jamais de chaîne en dur dans les composants une fois l'i18n en place.
+- **Retour d'information** : toute action utilisateur annonce son résultat par un toast (`notify.success` / `notify.error` de `@resto/ui`, jamais `toast()` direct : règle ESLint), et tout échec d'envoi de formulaire passe par `handleSubmitError` (erreurs de validation de l'API sous les champs, autres erreurs en message général + toast). Tester : succès, erreur de validation, 500, réseau coupé.
+- **Textes FR/EN** : `packages/ui/src/i18n/{fr,en}.ts` (même structure imposée par le type). Les erreurs de l'API et des schémas Zod sont des **clés** (`pin.weak`, `auth.invalidCredentials`…) traduites dans `errors` : un test échoue si une clé émise par l'API ou par un schéma partagé n'est pas traduite. Jamais de chaîne en dur dans un composant. La langue vient du cookie `locale`.
 
 ### 3. API : validation et modules
 
@@ -137,21 +152,21 @@ Le hook Husky (`.husky/pre-commit`) enchaîne et bloque au moindre échec : **li
 
 ## Feuille de route
 
-Fait : squelette monorepo, schéma Prisma + migration `init`, `/health` avec ping base.
+Fait : squelette monorepo, schéma Prisma + migration `init`, `/health` avec ping base, **authentification complète** (voir section dédiée : API, écrans des deux sites, tests unitaires/fonctionnels/Playwright, seed).
 À faire, dans l'ordre :
 
-1. **Auth** : inscription/connexion (email + Argon2), JWT access + refresh, gardes par rôle selon `Membership`, seed d'un restaurant de démo.
-2. CRUD catalogue (catégories, produits, tables) côté API + back-office.
-3. Premier flux complet : serveur prend une commande → cuisine → caissier encaisse, **avec le hors-ligne dès cette itération**.
-4. Vitrine : annuaire, menu, commande à emporter, suivi en direct.
-5. Réservations (agenda partagé vitrine/back-office).
-6. Apps mobiles, puis paiements/WhatsApp (après immatriculation), livraison, fidélité.
+1. CRUD catalogue (catégories, produits, tables) côté API + back-office.
+2. Premier flux complet : serveur prend une commande → cuisine → caissier encaisse, **avec le hors-ligne dès cette itération**.
+3. Vitrine : annuaire, menu, commande à emporter, suivi en direct.
+4. Réservations (agenda partagé vitrine/back-office).
+5. Apps mobiles, puis paiements/WhatsApp (après immatriculation), livraison, fidélité.
 
 ## Points à régler
 
 - **Sécurité par ligne (RLS Postgres)** pour isoler les restaurants ; aujourd'hui l'isolation n'existe que dans le futur code applicatif.
 - Rien en base n'impose qu'une table/un produit appartienne au même restaurant que sa commande : à vérifier dans l'API.
-- Tests : seulement des tests d'amorçage (santé, `@resto/shared`, page d'accueil) ; à étoffer avec chaque fonctionnalité.
-- Pas de seed, pas de Dockerfile/déploiement VPS (Docker Compose + Caddy/Nginx HTTPS à prévoir), pas de CI.
-- Pas d'i18n, pas de PWA/service worker, pas de temps réel encore.
+- Tests : l'authentification est couverte à tous les niveaux ; chaque nouvelle fonctionnalité doit apporter les siens (règle 1).
+- Pas de Dockerfile/déploiement VPS (Docker Compose + Caddy/Nginx HTTPS à prévoir) ; le CI ne déploie rien.
+- Pas de PWA/service worker ni de temps réel encore ; l'i18n couvre pour l'instant les écrans d'authentification, de restaurant et d'équipe.
+- Authentification : une demande de récupération différée n'est pas notifiée hors de l'application (pas de SMS/WhatsApp) ; le titulaire ne la voit qu'à sa prochaine connexion ou via un gérant. À compléter après immatriculation.
 - Marché : un « Uber Eats » demande du volume des deux côtés — commencer avec peu de restaurants, côté back-office d'abord (valeur sans clients).

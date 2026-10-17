@@ -1,10 +1,11 @@
-import { formatXAF } from '@resto/shared';
+import { SiteHeader } from '@/components/layout/site-header';
+import { HomeContent } from '@/components/home-content';
 
-export default function Home() {
+export default function HomePage() {
   return (
-    <main style={{ padding: 24 }}>
-      <h1>Vitrine</h1>
-      <p>Exemple de prix : {formatXAF(2500)}</p>
-    </main>
+    <>
+      <SiteHeader />
+      <HomeContent />
+    </>
   );
 }

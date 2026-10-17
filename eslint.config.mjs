@@ -17,8 +17,9 @@ export default tseslint.config(
       '**/next-env.d.ts',
       // Client Prisma généré
       'apps/api/src/generated/**',
-      // Composants générés par shadcn/ui (une fois installé)
+      // Composants générés par shadcn/ui
       'apps/*/src/components/ui/**',
+      'packages/ui/src/components/ui/**',
     ],
   },
   js.configs.recommended,
@@ -34,12 +35,34 @@ export default tseslint.config(
     },
   },
   {
-    files: ['apps/backoffice/**/*.{ts,tsx}', 'apps/storefront/**/*.{ts,tsx}'],
+    files: [
+      'apps/backoffice/**/*.{ts,tsx}',
+      'apps/storefront/**/*.{ts,tsx}',
+      'packages/ui/**/*.{ts,tsx}',
+    ],
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
     plugins: { 'react-hooks': reactHooks },
     rules: {
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
+    },
+  },
+  {
+    // Toute action annonce son résultat via `notify` : jamais `toast()` ni `sonner` en direct.
+    files: ['apps/**/*.{ts,tsx}', 'packages/ui/**/*.{ts,tsx}'],
+    ignores: ['packages/ui/src/feedback/notify.ts', 'packages/ui/src/components/ui/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'sonner',
+              message: 'Utiliser `notify` de @resto/ui (jamais toast() directement).',
+            },
+          ],
+        },
+      ],
     },
   },
 );

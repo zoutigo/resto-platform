@@ -1,0 +1,4 @@
+@import '@resto/ui/styles/globals.css';
+
+/* Tailwind ne scanne pas les paquets du monorepo tout seul : on lui indique où chercher les classes. */
+@source '../../../../packages/ui/src';

@@ -27,7 +27,7 @@ export function normalizeAnswer(input: string): string {
     .replace(/(.)\1+/g, '$1');
 }
 
-export const recoveryQuestionSchema = z.enum(RECOVERY_QUESTIONS);
+export const recoveryQuestionSchema = z.enum(RECOVERY_QUESTIONS, { error: 'question.required' });
 
 const MIN_AGE_YEARS = 10;
 const MIN_YEAR = 1900;
@@ -35,20 +35,44 @@ const MIN_YEAR = 1900;
 const daysInMonth = (year: number, month: number) =>
   new Date(Date.UTC(year, month, 0)).getUTCDate();
 
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+const datePart = z.coerce.number('birthDate.invalid').int('birthDate.invalid');
+
 /**
  * Date de naissance saisie avec trois menus (jour, mois, année) ; sortie `YYYY-MM-DD`.
+ * Elle accepte AUSSI sa propre sortie (chaîne ISO) : valider deux fois donne le même résultat,
+ * ce qui permet à un formulaire d'envoyer à l'API une valeur déjà validée côté navigateur.
  * `now` est injectable pour tester la borne d'âge.
  */
 export const birthDateSchema = (now: Date = new Date()) =>
   z
-    .object({
-      day: z.coerce.number().int().min(1).max(31),
-      month: z.coerce.number().int().min(1).max(12),
-      year: z.coerce.number().int().min(MIN_YEAR),
-    })
+    .union(
+      [
+        z.object({
+          day: datePart.min(1, 'birthDate.invalid').max(31, 'birthDate.invalid'),
+          month: datePart.min(1, 'birthDate.invalid').max(12, 'birthDate.invalid'),
+          year: datePart.min(MIN_YEAR, 'birthDate.invalid'),
+        }),
+        z
+          .string()
+          .regex(ISO_DATE, 'birthDate.invalid')
+          .transform((iso) => {
+            const [, year, month, day] = ISO_DATE.exec(iso)!;
+            return { day: Number(day), month: Number(month), year: Number(year) };
+          }),
+      ],
+      'birthDate.invalid',
+    )
     .transform((value, ctx) => {
       const { day, month, year } = value;
-      const valid = year <= now.getUTCFullYear() - MIN_AGE_YEARS && day <= daysInMonth(year, month);
+      const valid =
+        year >= MIN_YEAR &&
+        year <= now.getUTCFullYear() - MIN_AGE_YEARS &&
+        month >= 1 &&
+        month <= 12 &&
+        day >= 1 &&
+        day <= daysInMonth(year, month);
       if (!valid) {
         ctx.addIssue({ code: 'custom', message: 'birthDate.invalid' });
         return z.NEVER;
