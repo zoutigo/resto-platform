@@ -36,6 +36,15 @@ enum RecoveryStatus {
   CANCELLED
 }
 
+enum EmailCodePurpose {
+  /// Inscription par email : le compte n'existe qu'après saisie du code
+  REGISTER
+  /// Rattacher un email à un compte existant
+  ADD_EMAIL
+  /// Réinitialisation du mot de passe ou du PIN
+  RESET
+}
+
 enum CredentialType {
   PIN
   PASSWORD
@@ -457,4 +466,23 @@ model RecoveryRequest {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, status])
+}
+
+/// Code à 6 chiffres envoyé par email. Pour REGISTER, porte aussi les données d'inscription
+/// (le compte n'est créé qu'à la vérification, donc aucun compte orphelin ni email « squatté »).
+model EmailCode {
+  id           String           @id @default(uuid(7))
+  purpose      EmailCodePurpose
+  email        String
+  userId       String?
+  codeHash     String
+  attempts     Int              @default(0)
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime         @default(now())
+  audience     AuthAudience?
+  name         String?
+  passwordHash String?
+
+  @@index([email, purpose])
 }

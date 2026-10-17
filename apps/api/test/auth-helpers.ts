@@ -63,3 +63,6 @@ export function cookieValue(res: request.Response, name: string): string | undef
 
 export const setCookieLine = (res: request.Response, name: string): string | undefined =>
   ([] as string[]).concat(res.headers['set-cookie'] ?? []).find((c) => c.startsWith(`${name}=`));
+
+/** Adresse unique par test : les compteurs d'envoi/vérification sont par adresse. */
+export const uniqueEmail = () => `test${randomInt(1_000_000_000)}@example.cm`;

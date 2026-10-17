@@ -4,3 +4,4 @@ export * from './recovery.js';
 export * from './register.js';
 export * from './team.js';
 export * from './recover.js';
+export * from './email.js';

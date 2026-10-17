@@ -41,6 +41,11 @@ export class HasherService {
     }
   }
 
+  /** Code à 6 chiffres envoyé par email. */
+  generateEmailCode(): string {
+    return String(randomInt(1_000_000)).padStart(6, '0');
+  }
+
   /** Code de secours lisible : `XXXX-XXXX-XXXX`, tirage sans biais. */
   generateRecoveryCode(): string {
     const chars = Array.from(

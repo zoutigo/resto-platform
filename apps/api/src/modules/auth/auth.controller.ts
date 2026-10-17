@@ -26,21 +26,16 @@ import { parseOrThrow } from '../../common/zod-validation.pipe.js';
 import { AudiencePipe } from './audience.pipe.js';
 import { AUTH_CONFIG, type AuthConfig } from './auth.config.js';
 import { AllowMustChangePin, Authenticated, CurrentAuth } from './auth.guard.js';
-import { type AuthContext, AuthService } from './auth.service.js';
+import { AuthService } from './auth.service.js';
+import {
+  contextOf,
+  cookieName,
+  cookieOptions,
+  deliverSession,
+  readRefreshToken,
+} from './auth-transport.js';
 import { RecoveryService } from './recovery.service.js';
-import type { IssuedSession } from './session.service.js';
 import type { AccessClaims, Audience } from './token.service.js';
-
-const NATIVE_HEADER = 'x-client';
-
-const cookieName = (audience: Audience) => `resto_${audience}_rt`;
-const isNative = (req: Request) => req.headers[NATIVE_HEADER] === 'native';
-
-const contextOf = (req: Request): AuthContext => ({
-  ip: req.ip,
-  userAgent: req.headers['user-agent'],
-  deviceId: typeof req.headers['x-device-id'] === 'string' ? req.headers['x-device-id'] : null,
-});
 
 /**
  * Authentification des deux sites : `/auth/staff/*` (back-office) et `/auth/customer/*`
@@ -71,7 +66,7 @@ export class AuthController {
       input,
       contextOf(req),
     );
-    return { user, recoveryCode, ...this.deliver(audience, req, res, session) };
+    return { user, recoveryCode, ...deliverSession(this.config, audience, req, res, session) };
   }
 
   @Post('login')
@@ -88,7 +83,12 @@ export class AuthController {
       input,
       contextOf(req),
     );
-    return { user, mustChangePin, recoveryCancelled, ...this.deliver(audience, req, res, session) };
+    return {
+      user,
+      mustChangePin,
+      recoveryCancelled,
+      ...deliverSession(this.config, audience, req, res, session),
+    };
   }
 
   @Post('refresh')
@@ -99,7 +99,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const token = this.readRefreshToken(audience, req, body);
+    const token = readRefreshToken(audience, req, body);
     if (!token) {
       throw new UnauthorizedException({
         statusCode: 401,
@@ -108,7 +108,7 @@ export class AuthController {
       });
     }
     const { session } = await this.auth.refresh(audience, token, contextOf(req));
-    return this.deliver(audience, req, res, session);
+    return deliverSession(this.config, audience, req, res, session);
   }
 
   @Post('logout')
@@ -119,8 +119,8 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    await this.auth.logout(this.readRefreshToken(audience, req, body));
-    res.clearCookie(cookieName(audience), this.cookieOptions(audience));
+    await this.auth.logout(readRefreshToken(audience, req, body));
+    res.clearCookie(cookieName(audience), cookieOptions(this.config, audience));
   }
 
   @Get('me')
@@ -149,7 +149,7 @@ export class AuthController {
       input.newPin,
       contextOf(req),
     );
-    return this.deliver(audience, req, res, session);
+    return deliverSession(this.config, audience, req, res, session);
   }
 
   /** PIN oublié, avec le code de secours : réinitialisation immédiate. */
@@ -167,7 +167,7 @@ export class AuthController {
       input,
       contextOf(req),
     );
-    return { user, recoveryCode, ...this.deliver(audience, req, res, session) };
+    return { user, recoveryCode, ...deliverSession(this.config, audience, req, res, session) };
   }
 
   /**
@@ -191,7 +191,7 @@ export class AuthController {
     return {
       status: 'completed',
       user: result.user,
-      ...this.deliver(audience, req, res, result.session),
+      ...deliverSession(this.config, audience, req, res, result.session),
     };
   }
 
@@ -206,7 +206,7 @@ export class AuthController {
   ) {
     const input = parseOrThrow(completeRecoverySchema, body);
     const { user, session } = await this.recovery.completePending(audience, input, contextOf(req));
-    return { user, ...this.deliver(audience, req, res, session) };
+    return { user, ...deliverSession(this.config, audience, req, res, session) };
   }
 
   /** « Ce n'est pas moi » : annule les récupérations en attente du compte connecté. */
@@ -229,36 +229,5 @@ export class AuthController {
   ) {
     const input = parseOrThrow(regenerateRecoveryCodeSchema, body);
     return this.recovery.regenerateCode(claims.userId, input.pin, contextOf(req));
-  }
-
-  private readRefreshToken(
-    audience: Audience,
-    req: Request,
-    body: { refreshToken?: string } | undefined,
-  ): string | undefined {
-    if (isNative(req))
-      return typeof body?.refreshToken === 'string' ? body.refreshToken : undefined;
-    const cookie = (req.cookies as Record<string, string> | undefined)?.[cookieName(audience)];
-    return typeof cookie === 'string' ? cookie : undefined;
-  }
-
-  private cookieOptions(audience: Audience) {
-    return {
-      httpOnly: true,
-      sameSite: 'lax' as const,
-      secure: this.config.secureCookies,
-      path: `/auth/${audience}`,
-    };
-  }
-
-  /** Pose le cookie (web) ou renvoie le refresh token (natif) ; jamais les deux. */
-  private deliver(audience: Audience, req: Request, res: Response, session: IssuedSession) {
-    const base = { accessToken: session.accessToken, expiresIn: session.expiresIn };
-    if (isNative(req)) return { ...base, refreshToken: session.refreshToken };
-    res.cookie(cookieName(audience), session.refreshToken, {
-      ...this.cookieOptions(audience),
-      maxAge: session.refreshTtlSeconds * 1000,
-    });
-    return base;
   }
 }
