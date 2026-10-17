@@ -23,6 +23,24 @@ enum MembershipStatus {
   REVOKED
 }
 
+enum PhoneVerifiedMethod {
+  /// Le restaurant a rappelé le numéro et la personne a répondu
+  CALLBACK
+  /// Réservé : code SMS / WhatsApp après immatriculation
+  OTP
+}
+
+enum CredentialType {
+  PIN
+  PASSWORD
+}
+
+/// Espace d'authentification : le personnel (back-office) ou les clients (vitrine)
+enum AuthAudience {
+  STAFF
+  CUSTOMER
+}
+
 enum OrderStatus {
   DRAFT
   PENDING_PREP
@@ -64,19 +82,27 @@ enum ReservationStatus {
 // ───────── Identité & multi-tenant ─────────
 
 model User {
-  id           String   @id @default(uuid(7))
-  email        String   @unique
-  passwordHash String
-  firstName    String
-  lastName     String
-  phone        String?
-  locale       String   @default("fr")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String               @id @default(uuid(7))
+  name                String
+  phone               String?              @unique
+  phoneVerifiedAt     DateTime?
+  phoneVerifiedMethod PhoneVerifiedMethod?
+  email               String?              @unique
+  emailVerifiedAt     DateTime?
+  googleSub           String?              @unique
+  locale              String               @default("fr")
+  /// Compte en mode restreint (après récupération par questions) jusqu'à cette date
+  restrictedUntil     DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
-  memberships  Membership[]
-  orders       Order[]       @relation("CustomerOrders")
-  reservations Reservation[]
+  memberships     Membership[]
+  orders          Order[]          @relation("CustomerOrders")
+  reservations    Reservation[]
+  credentials     Credential[]
+  recoveryProfile RecoveryProfile?
+  recoveryCodes   RecoveryCode[]
+  refreshTokens   RefreshToken[]
 }
 
 model Restaurant {
@@ -302,4 +328,103 @@ model SyncAction {
   restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
   @@index([restaurantId, receivedAt])
+}
+
+// ───────── Authentification ─────────
+
+model Credential {
+  id         String         @id @default(uuid(7))
+  userId     String
+  type       CredentialType
+  /// Argon2id du secret, avec pepper serveur
+  hash       String
+  /// Doit être changé à la prochaine connexion (PIN temporaire donné par un gérant)
+  mustChange Boolean        @default(false)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+}
+
+/// Données de récupération : empreintes uniquement, jamais en clair.
+model RecoveryProfile {
+  userId        String   @id
+  birthDateHash String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers RecoveryAnswer[]
+}
+
+model RecoveryAnswer {
+  id         String @id @default(uuid(7))
+  userId     String
+  /// RECOVERY_QUESTIONS de @resto/shared
+  question   String
+  answerHash String
+
+  profile RecoveryProfile @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@unique([userId, question])
+}
+
+/// Code de secours remis une seule fois à l'inscription.
+model RecoveryCode {
+  id        String    @id @default(uuid(7))
+  userId    String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Jeton de rafraîchissement, stocké haché (SHA-256), avec rotation par « famille ».
+model RefreshToken {
+  id        String       @id @default(uuid(7))
+  userId    String
+  audience  AuthAudience
+  familyId  String
+  tokenHash String       @unique
+  deviceId  String?
+  userAgent String?
+  createdAt DateTime     @default(now())
+  expiresAt DateTime
+  /// Renseigné quand le jeton a été échangé contre un nouveau (rejeu = famille révoquée)
+  usedAt    DateTime?
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+/// Tentatives d'authentification (échecs et succès) pour le ralentissement progressif.
+model AuthAttempt {
+  id        String   @id @default(uuid(7))
+  /// ex. `login:phone:+237677123456`, `login:ip:1.2.3.4`
+  key       String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([key, createdAt])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid(7))
+  userId       String?
+  restaurantId String?
+  action       String
+  meta         Json?
+  ip           String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([restaurantId, createdAt])
 }
