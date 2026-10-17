@@ -106,6 +106,10 @@ export class SessionService {
     familyId: string,
   ): Promise<IssuedSession> {
     const refreshToken = this.tokens.generateRefreshToken();
+    const pin = await this.prisma.credential.findUnique({
+      where: { userId_type: { userId, type: 'PIN' } },
+      select: { mustChange: true },
+    });
     await this.prisma.refreshToken.create({
       data: {
         userId,
@@ -119,7 +123,11 @@ export class SessionService {
     });
     return {
       userId,
-      accessToken: await this.tokens.signAccess({ userId, audience }),
+      accessToken: await this.tokens.signAccess({
+        userId,
+        audience,
+        mustChangePin: pin?.mustChange ?? false,
+      }),
       expiresIn: this.config.accessTtlSeconds,
       refreshToken,
       refreshTtlSeconds: this.config.refreshTtlSeconds,

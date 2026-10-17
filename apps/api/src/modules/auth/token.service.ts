@@ -10,6 +10,8 @@ const ISSUER = 'resto-api';
 export interface AccessClaims {
   userId: string;
   audience: Audience;
+  /** PIN temporaire : seules les routes marquées `@AllowMustChangePin()` restent ouvertes */
+  mustChangePin: boolean;
 }
 
 @Injectable()
@@ -18,7 +20,7 @@ export class TokenService {
 
   /** JWT d'accès court, lié à un espace : un jeton `customer` n'ouvre jamais le back-office. */
   signAccess(claims: AccessClaims): Promise<string> {
-    return new SignJWT({})
+    return new SignJWT({ mc: claims.mustChangePin })
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(claims.userId)
       .setAudience(claims.audience)
@@ -36,7 +38,7 @@ export class TokenService {
         algorithms: ['HS256'],
       });
       if (!payload.sub) throw new Error('sub manquant');
-      return { userId: payload.sub, audience };
+      return { userId: payload.sub, audience, mustChangePin: payload.mc === true };
     } catch {
       throw new UnauthorizedException({
         statusCode: 401,

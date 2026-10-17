@@ -1,5 +1,6 @@
 import { createHash, randomInt } from 'node:crypto';
 import { hash, verify } from '@node-rs/argon2';
+import { isWeakPin } from '@resto/shared';
 import { Inject, Injectable } from '@nestjs/common';
 import { AUTH_CONFIG, type AuthConfig } from './auth.config.js';
 
@@ -30,6 +31,14 @@ export class HasherService {
   /** Empreinte déterministe d'un jeton aléatoire fort (refresh token) : SHA-256 suffit. */
   fingerprint(token: string): string {
     return createHash('sha256').update(token).digest('hex');
+  }
+
+  /** PIN temporaire à 6 chiffres, jamais un PIN trivial. */
+  generateTemporaryPin(): string {
+    for (;;) {
+      const pin = String(randomInt(1_000_000)).padStart(6, '0');
+      if (!isWeakPin(pin)) return pin;
+    }
   }
 
   /** Code de secours lisible : `XXXX-XXXX-XXXX`, tirage sans biais. */

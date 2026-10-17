@@ -1,6 +1,7 @@
 import {
   type CanActivate,
   type ExecutionContext,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   SetMetadata,
@@ -12,6 +13,7 @@ import type { Request } from 'express';
 import { type AccessClaims, type Audience, TokenService } from './token.service.js';
 
 const AUDIENCE_KEY = 'auth:audience';
+const ALLOW_MUST_CHANGE_KEY = 'auth:allowMustChange';
 
 /**
  * Exige un jeton d'accès valide pour l'espace indiqué (`staff` ou `customer`).
@@ -19,6 +21,9 @@ const AUDIENCE_KEY = 'auth:audience';
  */
 export const Authenticated = (audience: Audience | 'param' = 'param') =>
   SetMetadata(AUDIENCE_KEY, audience);
+
+/** Laisse passer un compte au PIN temporaire (profil, changement de PIN). */
+export const AllowMustChangePin = () => SetMetadata(ALLOW_MUST_CHANGE_KEY, true);
 
 export type AuthenticatedRequest = Request & { auth: AccessClaims };
 
@@ -54,7 +59,19 @@ export class AccessTokenGuard implements CanActivate {
         message: 'auth.missingToken',
       });
     }
-    request.auth = await this.tokens.verifyAccess(token, audience);
+    const claims = await this.tokens.verifyAccess(token, audience);
+    const allowed = this.reflector.getAllAndOverride<boolean | undefined>(ALLOW_MUST_CHANGE_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (claims.mustChangePin && !allowed) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: 'Forbidden',
+        message: 'auth.mustChangePin',
+      });
+    }
+    request.auth = claims;
     return true;
   }
 }

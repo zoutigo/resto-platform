@@ -82,27 +82,30 @@ enum ReservationStatus {
 // ───────── Identité & multi-tenant ─────────
 
 model User {
-  id                  String               @id @default(uuid(7))
-  name                String
-  phone               String?              @unique
-  phoneVerifiedAt     DateTime?
-  phoneVerifiedMethod PhoneVerifiedMethod?
-  email               String?              @unique
-  emailVerifiedAt     DateTime?
-  googleSub           String?              @unique
-  locale              String               @default("fr")
+  id                    String               @id @default(uuid(7))
+  name                  String
+  phone                 String?              @unique
+  phoneVerifiedAt       DateTime?
+  phoneVerifiedMethod   PhoneVerifiedMethod?
+  email                 String?              @unique
+  emailVerifiedAt       DateTime?
+  googleSub             String?              @unique
+  locale                String               @default("fr")
   /// Compte en mode restreint (après récupération par questions) jusqu'à cette date
-  restrictedUntil     DateTime?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  restrictedUntil       DateTime?
+  /// Restaurant qui a créé ce compte employé : lui seul peut réinitialiser son PIN
+  managedByRestaurantId String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
-  memberships     Membership[]
-  orders          Order[]          @relation("CustomerOrders")
-  reservations    Reservation[]
-  credentials     Credential[]
-  recoveryProfile RecoveryProfile?
-  recoveryCodes   RecoveryCode[]
-  refreshTokens   RefreshToken[]
+  managedByRestaurant Restaurant?      @relation("ManagedUsers", fields: [managedByRestaurantId], references: [id], onDelete: SetNull)
+  memberships         Membership[]
+  orders              Order[]          @relation("CustomerOrders")
+  reservations        Reservation[]
+  credentials         Credential[]
+  recoveryProfile     RecoveryProfile?
+  recoveryCodes       RecoveryCode[]
+  refreshTokens       RefreshToken[]
 }
 
 model Restaurant {
@@ -123,6 +126,7 @@ model Restaurant {
   updatedAt    DateTime @updatedAt
 
   memberships  Membership[]
+  managedUsers User[]        @relation("ManagedUsers")
   tables       DiningTable[]
   categories   Category[]
   products     Product[]

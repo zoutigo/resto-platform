@@ -1,3 +1,4 @@
+import { isWeakPin } from '@resto/shared';
 import { describe, expect, it } from 'vitest';
 import { loadAuthConfig } from './auth.config.js';
 import { HasherService } from './hasher.service.js';
@@ -61,4 +62,19 @@ describe('HasherService — jetons et codes', () => {
       expect(hasher.normalizeRecoveryCode(code)).toBeNull();
     },
   );
+});
+
+describe('HasherService — PIN temporaire', () => {
+  it('produit 6 chiffres, jamais un PIN trivial', () => {
+    for (let i = 0; i < 300; i++) {
+      const pin = hasher.generateTemporaryPin();
+      expect(pin).toMatch(/^\d{6}$/);
+      expect(isWeakPin(pin)).toBe(false);
+    }
+  });
+
+  it('varie d’un tirage à l’autre', () => {
+    const pins = new Set(Array.from({ length: 50 }, () => hasher.generateTemporaryPin()));
+    expect(pins.size).toBeGreaterThan(40);
+  });
 });

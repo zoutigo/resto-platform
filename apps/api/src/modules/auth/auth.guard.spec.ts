@@ -1,7 +1,7 @@
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it } from 'vitest';
-import { AccessTokenGuard, Authenticated } from './auth.guard.js';
+import { AccessTokenGuard, AllowMustChangePin, Authenticated } from './auth.guard.js';
 import { loadAuthConfig } from './auth.config.js';
 import { TokenService } from './token.service.js';
 
@@ -16,6 +16,9 @@ class Protected {
   handler() {}
   @Authenticated()
   dynamic() {}
+  @Authenticated('staff')
+  @AllowMustChangePin()
+  profile() {}
 }
 
 function context(
@@ -49,7 +52,7 @@ describe('AccessTokenGuard', () => {
   });
 
   it('accepte un jeton du bon espace et pose l’identité', async () => {
-    const jwt = await tokens.signAccess({ userId: 'u1', audience: 'staff' });
+    const jwt = await tokens.signAccess({ userId: 'u1', audience: 'staff', mustChangePin: false });
     const ctx = context(Protected, 'handler', { headers: { authorization: `Bearer ${jwt}` } });
     expect(await guard.canActivate(ctx)).toBe(true);
     expect(ctx.switchToHttp().getRequest()).toMatchObject({
@@ -58,13 +61,21 @@ describe('AccessTokenGuard', () => {
   });
 
   it('refuse un jeton client sur une route du personnel', async () => {
-    const jwt = await tokens.signAccess({ userId: 'u1', audience: 'customer' });
+    const jwt = await tokens.signAccess({
+      userId: 'u1',
+      audience: 'customer',
+      mustChangePin: false,
+    });
     const ctx = context(Protected, 'handler', { headers: { authorization: `Bearer ${jwt}` } });
     await expect(guard.canActivate(ctx)).rejects.toMatchObject({ status: 401 });
   });
 
   it('lit l’espace dans la route quand il est dynamique', async () => {
-    const jwt = await tokens.signAccess({ userId: 'u1', audience: 'customer' });
+    const jwt = await tokens.signAccess({
+      userId: 'u1',
+      audience: 'customer',
+      mustChangePin: false,
+    });
     const headers = { authorization: `Bearer ${jwt}` };
     expect(
       await guard.canActivate(
@@ -79,5 +90,24 @@ describe('AccessTokenGuard', () => {
   it('répond 404 pour un espace inconnu', async () => {
     const ctx = context(Protected, 'dynamic', { headers: {}, params: { audience: 'admin' } });
     await expect(guard.canActivate(ctx)).rejects.toMatchObject({ status: 404 });
+  });
+
+  describe('PIN temporaire', () => {
+    const tempHeaders = async () => ({
+      authorization: `Bearer ${await tokens.signAccess({ userId: 'u1', audience: 'staff', mustChangePin: true })}`,
+    });
+
+    it('bloque (403) toute route ordinaire', async () => {
+      const ctx = context(Protected, 'handler', { headers: await tempHeaders() });
+      await expect(guard.canActivate(ctx)).rejects.toMatchObject({
+        status: 403,
+        response: { message: 'auth.mustChangePin' },
+      });
+    });
+
+    it('laisse passer les routes marquées AllowMustChangePin', async () => {
+      const ctx = context(Protected, 'profile', { headers: await tempHeaders() });
+      expect(await guard.canActivate(ctx)).toBe(true);
+    });
   });
 });

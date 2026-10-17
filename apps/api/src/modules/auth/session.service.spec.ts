@@ -16,8 +16,9 @@ function setup() {
     findUnique: vi.fn(),
     updateMany: vi.fn().mockResolvedValue({ count: 1 }),
   };
-  const prisma = { refreshToken } as unknown as PrismaService;
-  return { refreshToken, service: new SessionService(prisma, hasher, tokens, config) };
+  const credential = { findUnique: vi.fn().mockResolvedValue({ mustChange: false }) };
+  const prisma = { refreshToken, credential } as unknown as PrismaService;
+  return { refreshToken, credential, service: new SessionService(prisma, hasher, tokens, config) };
 }
 
 const stored = (over: Record<string, unknown> = {}) => ({
@@ -58,6 +59,26 @@ describe('SessionService.issue', () => {
     await service.issue('u1', 'staff', {});
     const [a, b] = refreshToken.create.mock.calls.map((c) => c[0].data.familyId);
     expect(a).not.toBe(b);
+  });
+});
+
+describe('SessionService — PIN temporaire', () => {
+  it('marque le jeton d’accès quand le PIN doit être changé', async () => {
+    const { credential, service } = setup();
+    credential.findUnique.mockResolvedValue({ mustChange: true });
+    const session = await service.issue('u1', 'staff', {});
+    expect(await tokens.verifyAccess(session.accessToken, 'staff')).toMatchObject({
+      mustChangePin: true,
+    });
+  });
+
+  it('un compte sans PIN (Google seul) n’est pas marqué', async () => {
+    const { credential, service } = setup();
+    credential.findUnique.mockResolvedValue(null);
+    const session = await service.issue('u1', 'staff', {});
+    expect(await tokens.verifyAccess(session.accessToken, 'staff')).toMatchObject({
+      mustChangePin: false,
+    });
   });
 });
 

@@ -49,6 +49,8 @@ export function client(app: INestApplication, opts: { ip?: string; native?: bool
     ip,
     post: (path: string) => withHeaders(http().post(path)),
     get: (path: string) => withHeaders(http().get(path)),
+    patch: (path: string) => withHeaders(http().patch(path)),
+    delete: (path: string) => withHeaders(http().delete(path)),
   };
 }
 

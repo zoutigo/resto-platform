@@ -21,7 +21,7 @@ import type { Request, Response } from 'express';
 import { parseOrThrow } from '../../common/zod-validation.pipe.js';
 import { AudiencePipe } from './audience.pipe.js';
 import { AUTH_CONFIG, type AuthConfig } from './auth.config.js';
-import { Authenticated, CurrentAuth } from './auth.guard.js';
+import { AllowMustChangePin, Authenticated, CurrentAuth } from './auth.guard.js';
 import { type AuthContext, AuthService } from './auth.service.js';
 import type { IssuedSession } from './session.service.js';
 import type { AccessClaims, Audience } from './token.service.js';
@@ -115,6 +115,7 @@ export class AuthController {
 
   @Get('me')
   @Authenticated()
+  @AllowMustChangePin()
   me(@Param('audience', AudiencePipe) audience: Audience, @CurrentAuth() claims: AccessClaims) {
     return this.auth.me(audience, claims.userId);
   }
@@ -122,6 +123,7 @@ export class AuthController {
   @Post('pin')
   @HttpCode(200)
   @Authenticated()
+  @AllowMustChangePin()
   async changePin(
     @Param('audience', AudiencePipe) audience: Audience,
     @CurrentAuth() claims: AccessClaims,
