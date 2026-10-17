@@ -39,6 +39,15 @@ export class TeamController {
     return this.team.resetPin(actor, memberId);
   }
 
+  @Post(':memberId/cancel-recovery')
+  @HttpCode(200)
+  cancelRecovery(
+    @CurrentMembership() actor: ActiveMembership,
+    @Param('memberId') memberId: string,
+  ) {
+    return this.team.cancelRecovery(actor, memberId);
+  }
+
   @Delete(':memberId')
   @HttpCode(204)
   remove(@CurrentMembership() actor: ActiveMembership, @Param('memberId') memberId: string) {

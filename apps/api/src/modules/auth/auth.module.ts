@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller.js';
 import { AuditService } from './audit.service.js';
 import { AuthService } from './auth.service.js';
 import { HasherService } from './hasher.service.js';
+import { RecoveryService } from './recovery.service.js';
 import { SessionService } from './session.service.js';
 import { ThrottleService } from './throttle.service.js';
 import { TokenService } from './token.service.js';
@@ -23,6 +24,7 @@ import { TokenService } from './token.service.js';
     SessionService,
     ThrottleService,
     AuditService,
+    RecoveryService,
     AuthService,
   ],
   exports: [
@@ -32,6 +34,7 @@ import { TokenService } from './token.service.js';
     SessionService,
     ThrottleService,
     AuditService,
+    RecoveryService,
   ],
 })
 export class AuthModule {}

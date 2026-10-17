@@ -4,6 +4,7 @@ import type { AuditService } from '../auth/audit.service.js';
 import { loadAuthConfig } from '../auth/auth.config.js';
 import { HasherService } from '../auth/hasher.service.js';
 import type { ActiveMembership } from '../auth/restaurant-roles.guard.js';
+import type { RecoveryService } from '../auth/recovery.service.js';
 import type { SessionService } from '../auth/session.service.js';
 import { TeamService } from './team.service.js';
 
@@ -43,13 +44,15 @@ function setup() {
   };
   const sessions = { revokeAllForUser: vi.fn().mockResolvedValue(undefined) };
   const audit = { log: vi.fn().mockResolvedValue(undefined) };
+  const recovery = { cancelForMember: vi.fn().mockResolvedValue(1) };
   const service = new TeamService(
     prisma as unknown as PrismaService,
     hasher,
     sessions as unknown as SessionService,
     audit as unknown as AuditService,
+    recovery as unknown as RecoveryService,
   );
-  return { prisma, sessions, audit, service };
+  return { prisma, sessions, audit, recovery, service };
 }
 
 let ctx: ReturnType<typeof setup>;
@@ -73,6 +76,7 @@ describe('TeamService.list', () => {
         role: 'WAITER',
         mustChangePin: true,
         pinResettable: true,
+        recoveryPendingUntil: null,
       },
     ]);
   });
@@ -229,6 +233,33 @@ describe('TeamService.resetPin', () => {
       await expect(ctx.service.resetPin(supervisor, 'x')).rejects.toMatchObject({ status: 403 });
     }
     expect(ctx.prisma.credential.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe('TeamService — récupération en attente', () => {
+  it('list signale une récupération en attente à l’échéance donnée', async () => {
+    const availableAt = new Date('2026-10-19T10:00:00Z');
+    ctx.prisma.membership.findMany.mockResolvedValue([
+      memberRow('w1', 'WAITER', { recoveryRequests: [{ availableAt }] }),
+    ]);
+    const [member] = await ctx.service.list('r1');
+    expect(member?.recoveryPendingUntil).toBe('2026-10-19T10:00:00.000Z');
+  });
+
+  it('cancelRecovery annule pour un membre géré par l’acteur', async () => {
+    ctx.prisma.membership.findUnique.mockResolvedValue(memberRow('w1', 'WAITER'));
+    expect(await ctx.service.cancelRecovery(owner, 'w1')).toEqual({ cancelled: 1 });
+    expect(ctx.recovery.cancelForMember).toHaveBeenCalledWith('w1', 'owner', 'r1');
+  });
+
+  it('cancelRecovery refuse un pair, un propriétaire ou un inconnu', async () => {
+    ctx.prisma.membership.findUnique.mockResolvedValue(memberRow('s2', 'SUPERVISOR'));
+    await expect(ctx.service.cancelRecovery(supervisor, 's2')).rejects.toMatchObject({
+      status: 403,
+    });
+    ctx.prisma.membership.findUnique.mockResolvedValue(null);
+    await expect(ctx.service.cancelRecovery(owner, 'x')).rejects.toMatchObject({ status: 404 });
+    expect(ctx.recovery.cancelForMember).not.toHaveBeenCalled();
   });
 });
 

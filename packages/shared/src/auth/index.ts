@@ -3,3 +3,4 @@ export * from './pin.js';
 export * from './recovery.js';
 export * from './register.js';
 export * from './team.js';
+export * from './recover.js';

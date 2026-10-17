@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma.service.js';
 import { AuditService } from '../auth/audit.service.js';
 import { HasherService } from '../auth/hasher.service.js';
 import type { ActiveMembership } from '../auth/restaurant-roles.guard.js';
+import { RecoveryService } from '../auth/recovery.service.js';
 import { SessionService } from '../auth/session.service.js';
 
 type MemberRow = {
@@ -20,6 +21,7 @@ type MemberRow = {
     phone: string | null;
     managedByRestaurantId: string | null;
     credentials: { mustChange: boolean }[];
+    recoveryRequests?: { availableAt: Date }[];
   };
 };
 
@@ -40,6 +42,7 @@ export class TeamService {
     private readonly hasher: HasherService,
     private readonly sessions: SessionService,
     private readonly audit: AuditService,
+    private readonly recovery: RecoveryService,
   ) {}
 
   async list(restaurantId: string) {
@@ -168,6 +171,15 @@ export class TeamService {
     return { temporaryPin };
   }
 
+  /** Annule une récupération de compte en attente (« ce n'est pas lui »). */
+  async cancelRecovery(actor: ActiveMembership, memberId: string): Promise<{ cancelled: number }> {
+    const target = await this.findTarget(actor.restaurantId, memberId);
+    if (!canManageRole(actor.role, target.role)) throw forbidden();
+    return {
+      cancelled: await this.recovery.cancelForMember(memberId, actor.userId, actor.restaurantId),
+    };
+  }
+
   /** Retire l'accès au restaurant (le compte lui-même n'est pas supprimé). */
   async remove(actor: ActiveMembership, memberId: string): Promise<void> {
     const target = await this.findTarget(actor.restaurantId, memberId);
@@ -193,6 +205,10 @@ export class TeamService {
           phone: true,
           managedByRestaurantId: true,
           credentials: { where: { type: 'PIN' as const }, select: { mustChange: true } },
+          recoveryRequests: {
+            where: { status: 'PENDING' as const },
+            select: { availableAt: true },
+          },
         },
       },
     };
@@ -224,6 +240,7 @@ export class TeamService {
       role: m.role,
       mustChangePin: m.user.credentials[0]?.mustChange ?? false,
       pinResettable: m.user.managedByRestaurantId === restaurantId,
+      recoveryPendingUntil: m.user.recoveryRequests?.[0]?.availableAt.toISOString() ?? null,
     };
   }
 }

@@ -2,9 +2,11 @@ import type { RegisterCustomer, RegisterOwner } from '@resto/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../../prisma.service.js';
 import type { AuditService } from './audit.service.js';
-import { AuthService, toPublicUser } from './auth.service.js';
+import { AuthService } from './auth.service.js';
+import { toPublicUser } from './public-user.js';
 import { loadAuthConfig } from './auth.config.js';
 import { HasherService } from './hasher.service.js';
+import type { RecoveryService } from './recovery.service.js';
 import type { SessionService } from './session.service.js';
 import type { ThrottleService } from './throttle.service.js';
 
@@ -68,14 +70,19 @@ function setup() {
     clear: vi.fn().mockResolvedValue(undefined),
   };
   const audit = { log: vi.fn().mockResolvedValue(undefined) };
+  const recovery = {
+    cancelOnLogin: vi.fn().mockResolvedValue(false),
+    pendingFor: vi.fn().mockResolvedValue(null),
+  };
   const service = new AuthService(
     prisma as unknown as PrismaService,
     hasher,
     sessions as unknown as SessionService,
     throttle as unknown as ThrottleService,
     audit as unknown as AuditService,
+    recovery as unknown as RecoveryService,
   );
-  return { prisma, sessions, throttle, audit, service };
+  return { prisma, sessions, throttle, audit, recovery, service };
 }
 
 let ctx: { ip: string };
@@ -182,6 +189,22 @@ describe('AuthService.login', () => {
     expect(throttle.recordFailure).not.toHaveBeenCalled();
   });
 
+  it('annule une récupération en attente et le signale', async () => {
+    const { prisma, recovery, service } = setup();
+    prisma.user.findUnique.mockResolvedValue(await userWithPin());
+    recovery.cancelOnLogin.mockResolvedValue(true);
+    const result = await service.login('staff', input, ctx);
+    expect(recovery.cancelOnLogin).toHaveBeenCalledWith('u1');
+    expect(result.recoveryCancelled).toBe(true);
+  });
+
+  it('n’annule rien quand la connexion échoue', async () => {
+    const { prisma, recovery, service } = setup();
+    prisma.user.findUnique.mockResolvedValue(await userWithPin());
+    await expect(service.login('staff', { ...input, pin: '000001' }, ctx)).rejects.toThrow();
+    expect(recovery.cancelOnLogin).not.toHaveBeenCalled();
+  });
+
   it('signale un PIN temporaire à changer', async () => {
     const { prisma, service } = setup();
     prisma.user.findUnique.mockResolvedValue(await userWithPin('483920', true));
@@ -265,6 +288,17 @@ describe('AuthService.refresh / logout / me', () => {
       { restaurantId: 'r1', role: 'OWNER' },
     ]);
     expect(await service.me('customer', 'u1')).not.toHaveProperty('memberships');
+  });
+
+  it('me expose une récupération en attente', async () => {
+    const { prisma, recovery, service } = setup();
+    prisma.user.findUnique.mockResolvedValue(userRow({ credentials: [], memberships: [] }));
+    recovery.pendingFor.mockResolvedValue({ availableAt: new Date('2026-10-19T10:00:00Z') });
+    expect((await service.me('staff', 'u1')).recoveryPending).toEqual({
+      availableAt: '2026-10-19T10:00:00.000Z',
+    });
+    recovery.pendingFor.mockResolvedValue(null);
+    expect((await service.me('staff', 'u1')).recoveryPending).toBeNull();
   });
 
   it('me échoue pour un utilisateur supprimé', async () => {

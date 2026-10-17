@@ -292,7 +292,8 @@ describe('Authentification (vraie base resto_test)', () => {
           .expect(200);
         expect(res.body.user.phone).toBe(phone);
         expect(res.body.mustChangePin).toBe(false);
-        expect(JSON.stringify(res.body)).not.toMatch(/hash|argon|recovery/i);
+        expect(JSON.stringify(res.body)).not.toMatch(/hash|argon|answer|birth|code/i);
+        expect(res.body.recoveryPending).toBeNull();
       });
 
       it('GET /me exige un jeton valide', async () => {

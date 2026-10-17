@@ -30,6 +30,12 @@ enum PhoneVerifiedMethod {
   OTP
 }
 
+enum RecoveryStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
 enum CredentialType {
   PIN
   PASSWORD
@@ -98,14 +104,15 @@ model User {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
-  managedByRestaurant Restaurant?      @relation("ManagedUsers", fields: [managedByRestaurantId], references: [id], onDelete: SetNull)
+  managedByRestaurant Restaurant?       @relation("ManagedUsers", fields: [managedByRestaurantId], references: [id], onDelete: SetNull)
   memberships         Membership[]
-  orders              Order[]          @relation("CustomerOrders")
+  orders              Order[]           @relation("CustomerOrders")
   reservations        Reservation[]
   credentials         Credential[]
   recoveryProfile     RecoveryProfile?
   recoveryCodes       RecoveryCode[]
   refreshTokens       RefreshToken[]
+  recoveryRequests    RecoveryRequest[]
 }
 
 model Restaurant {
@@ -431,4 +438,23 @@ model AuditLog {
 
   @@index([userId, createdAt])
   @@index([restaurantId, createdAt])
+}
+
+/// Récupération différée (comptes ayant un rôle dans un restaurant) : le nouveau PIN est
+/// choisi tout de suite mais n'entre en vigueur qu'à `availableAt`, sauf annulation.
+model RecoveryRequest {
+  id          String         @id @default(uuid(7))
+  userId      String
+  newPinHash  String
+  status      RecoveryStatus @default(PENDING)
+  availableAt DateTime
+  createdAt   DateTime       @default(now())
+  resolvedAt  DateTime?
+  /// Qui a annulé : le titulaire (« Ce n'est pas moi »), un gérant, ou sa propre connexion
+  cancelledBy String?
+  ip          String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
 }

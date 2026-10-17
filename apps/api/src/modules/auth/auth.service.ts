@@ -7,7 +7,9 @@ import {
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service.js';
 import { AuditService } from './audit.service.js';
+import { toPublicUser } from './public-user.js';
 import { HasherService } from './hasher.service.js';
+import { RecoveryService } from './recovery.service.js';
 import { type IssuedSession, type SessionContext, SessionService } from './session.service.js';
 import { ThrottleService } from './throttle.service.js';
 import type { Audience } from './token.service.js';
@@ -33,27 +35,6 @@ const invalidCredentials = () =>
 const isUniqueViolation = (e: unknown) =>
   typeof e === 'object' && e !== null && (e as { code?: string }).code === 'P2002';
 
-/** Vue publique d'un utilisateur : jamais d'empreinte ni de donnée de récupération. */
-export function toPublicUser(user: {
-  id: string;
-  name: string;
-  phone: string | null;
-  phoneVerifiedAt: Date | null;
-  email: string | null;
-  emailVerifiedAt: Date | null;
-  restrictedUntil: Date | null;
-}) {
-  return {
-    id: user.id,
-    name: user.name,
-    phone: user.phone,
-    phoneVerified: user.phoneVerifiedAt !== null,
-    email: user.email,
-    emailVerified: user.emailVerifiedAt !== null,
-    restricted: user.restrictedUntil !== null && user.restrictedUntil.getTime() > Date.now(),
-  };
-}
-
 @Injectable()
 export class AuthService {
   // Hachage factice pour garder un temps de réponse constant quand le numéro est inconnu.
@@ -65,6 +46,7 @@ export class AuthService {
     private readonly sessions: SessionService,
     private readonly throttle: ThrottleService,
     private readonly audit: AuditService,
+    private readonly recovery: RecoveryService,
   ) {}
 
   async register(audience: Audience, input: RegisterInput, ctx: AuthContext) {
@@ -146,8 +128,15 @@ export class AuthService {
 
     await this.throttle.clear(phoneKey);
     await this.audit.log({ action: 'auth.login', userId: user.id, ip: ctx.ip, meta: { audience } });
+    // Se connecter avec l'ancien PIN prouve que le titulaire est là : toute récupération en attente tombe.
+    const recoveryCancelled = await this.recovery.cancelOnLogin(user.id);
     const session = await this.sessions.issue(user.id, audience, ctx);
-    return { user: toPublicUser(user), mustChangePin: credential.mustChange, session };
+    return {
+      user: toPublicUser(user),
+      mustChangePin: credential.mustChange,
+      recoveryCancelled,
+      session,
+    };
   }
 
   async refresh(audience: Audience, token: string, ctx: AuthContext) {
@@ -171,9 +160,11 @@ export class AuthService {
       },
     });
     if (!user) throw invalidCredentials();
+    const pending = await this.recovery.pendingFor(userId);
     return {
       user: toPublicUser(user),
       mustChangePin: user.credentials[0]?.mustChange ?? false,
+      recoveryPending: pending ? { availableAt: pending.availableAt.toISOString() } : null,
       ...(audience === 'staff' ? { memberships: user.memberships } : {}),
     };
   }
